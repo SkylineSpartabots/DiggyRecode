@@ -110,7 +110,7 @@ public class DriveControlSystems {
         driverRX = scaledDeadBand(driverRX) * Constants.MaxAngularRate;
 
         // Flip translation axes on red alliance so driver always faces "forward"
-        if (DriverStation.getAlliance().get().equals(Alliance.Red)) {
+        if (DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red) {
             driverLX *= -1;
             driverLY *= -1;
         }
@@ -201,7 +201,7 @@ public class DriveControlSystems {
      */
     public void turnOnAutoAim() {
         mode_AlignToGoal = true;
-        targetGoal = DriverStation.getAlliance().get().equals(Alliance.Blue)
+        targetGoal = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Blue
                 ? Constants.FieldConstants.blueGoal.toTranslation2d()
                 : Constants.FieldConstants.redGoal.toTranslation2d();
     }

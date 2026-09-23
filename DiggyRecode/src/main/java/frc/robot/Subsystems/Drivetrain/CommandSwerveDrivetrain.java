@@ -234,7 +234,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public void resetOdoDynamic(resetPose location) {
         Pose2d pose = this.getState().Pose;
-        if(DriverStation.getAlliance().get().equals(Alliance.Blue)) {
+        if (DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Blue) {
 
                 if (location.equals(resetPose.TRENCH_LEFT)) {
                 pose = new Pose2d(

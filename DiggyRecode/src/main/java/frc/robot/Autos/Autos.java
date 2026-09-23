@@ -36,7 +36,7 @@ public final class Autos {
                         new WaitCommand(3.3),
                         CommandFactory.IntakeBallsOFF()).alongWith(new FollowChoreoTrajectory(traj)),
 
-                CommandFactory.AutoAimShoot().raceWith(new WaitCommand(6))
+                CommandFactory.AutoAimShoot().raceWith(new WaitCommand(10))
             );
     }
 
@@ -90,7 +90,7 @@ public final class Autos {
                 CommandFactory.IntakeBallsON(),
                         new WaitCommand(2.2),
                         CommandFactory.IntakeBallsOFF()).alongWith(new FollowChoreoTrajectory(traj)),
-                        CommandFactory.AutoAimShoot().raceWith(new WaitCommand(6)));
+                        CommandFactory.AutoAimShoot().raceWith(new WaitCommand(10)));
     }
                     
     public static Command trench_left_left_mid_chill() {

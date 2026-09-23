@@ -1,15 +1,18 @@
 package frc.robot.Commands;
 
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.ParallelCommandGroup;
 import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
+import frc.robot.Constants;
 import frc.robot.Commands.Convayor.SetConveyor;
 import frc.robot.Commands.Indexer.SetIndexer;
 import frc.robot.Commands.Intake.SetIntake;
 import frc.robot.Commands.Shooter.RampShooterWithDistance;
 import frc.robot.Commands.Shooter.SetShooter;
 import frc.robot.Commands.Shooter.SetShooterAtMeter;
+import frc.robot.Subsystems.Shooter;
 import frc.robot.Subsystems.Conveyor.ConveyorStates;
 import frc.robot.Subsystems.Indexer.IndexerStates;
 import frc.robot.Subsystems.Intake.IntakeStates;
@@ -23,34 +26,51 @@ import frc.robot.Subsystems.Intake.IntakeStates;
 public class CommandFactory {
 
     /**
-     * Aligns to the goal using vision (currently just waits 1 second),
-     * then feeds balls into the shooter using the pre-ramped distance-based velocity.
-     *
-     * @return Sequential command: wait for alignment → index + convey, alongside distance ramp
+     * Ramps from odometry and feeds once the flywheel is at speed.
+     * AlignToGoal used to sit in front of the feed; it is still commented out, so this
+     * does not add a fake extra wait on top of the ramp. Teleop uses {@link #RampShooter()}
+     * and {@link #Feed()} on separate buttons instead of this combined command.
      */
     public static Command AutoAimShoot() {
-        return new SequentialCommandGroup(
-            new ParallelCommandGroup(
-                // new AlignToGoal(), // vision auto-aim — re-enable when tuned
-                new WaitCommand(1)
-            ),
-            new SetIndexer(IndexerStates.ON),
-            new SetConveyor(ConveyorStates.ON)
-        ).alongWith(new RampShooterWithDistance());
+        return new RampShooterWithDistance().alongWith(
+            // new AlignToGoal().andThen(feedWhenShooterReady())
+            feedWhenShooterReady()
+        );
     }
 
     /**
-     * Waits 1 second for the shooter to ramp up, then feeds balls through indexer + conveyor.
-     * The shooter ramps to a computed distance-based RPS in parallel.
-     *
-     * @return Sequential command: 1s wait → feed balls, alongside distance-based shooter ramp
+     * Ramps the shooter from odometry and feeds once measured speed is close to the request.
+     * The old fixed 1 second wait fed balls while a 10 rps/s ramp was still near idle.
      */
     public static Command ShootAtDistance() {
-        return new SequentialCommandGroup(
-            new WaitCommand(1),
+        return new RampShooterWithDistance().alongWith(feedWhenShooterReady());
+    }
+
+    /**
+     * Shooter only. Driver button for spinning up. Does not run the indexer.
+     */
+    public static Command RampShooter() {
+        return new RampShooterWithDistance();
+    }
+
+    /**
+     * Indexer and conveyor only. Driver button for feeding. Does not touch the shooter.
+     */
+    public static Command Feed() {
+        return new ParallelCommandGroup(
             new SetIndexer(IndexerStates.ON),
             new SetConveyor(ConveyorStates.ON)
-        ).alongWith(new RampShooterWithDistance());
+        );
+    }
+
+    /**
+     * Waits until the flywheel is within tolerance of the odometry request, then feeds.
+     * Times out so auto cannot sit forever if the wheel never gets there.
+     */
+    private static Command feedWhenShooterReady() {
+        return Commands.waitUntil(() -> Shooter.getInstance().isReadyToFeed(Constants.shooterFeedToleranceRps))
+            .withTimeout(Constants.shooterFeedTimeoutSec)
+            .andThen(Feed());
     }
 
     /**
@@ -91,32 +111,34 @@ public class CommandFactory {
     }
 
     /**
-     * Shoots balls at a fixed distance by computing the required RPS from a lookup,
-     * waiting 1 second to ramp up, then feeding.
+     * Shoots balls at a fixed distance. The shooter still slews at 10 rps/s, so feeding
+     * waits until measured speed is close instead of a fixed 1 second.
      *
      * @param distance Target distance in meters
-     * @return Sequential command: set shooter velocity → wait → feed balls
      */
     public static Command LobAtMeter(double distance) {
         return new SequentialCommandGroup(
             new SetShooterAtMeter(distance),
-            new WaitCommand(1),
+            Commands.waitUntil(() -> Shooter.getInstance().isReadyToFeed(Constants.shooterFeedToleranceRps))
+                .withTimeout(Constants.shooterFeedTimeoutSec),
             new SetIndexer(IndexerStates.ON),
             new SetConveyor(ConveyorStates.ON)
         );
     }
 
     /**
-     * Shoots balls at a fixed explicit RPS target, then feeds after a 1.25s ramp delay.
+     * Shoots balls at a fixed explicit RPS target, then feeds after the ramp has had time to arrive.
      * Useful for testing a specific shooter speed without distance math.
      *
      * @param rps Target flywheel speed in rotations-per-second
-     * @return Sequential command: set shooter RPS → 1.25s wait → feed balls
+     * @return Sequential command: set shooter RPS → wait out the ramp → feed balls
      */
     public static Command LobAtRps(double rps) {
+        // 10 rps/s, plus a quarter second for the wheel to catch the setpoint.
+        double rampSeconds = Math.abs(rps) / Constants.shooterRampRpsPerSec + 0.25;
         return new SequentialCommandGroup(
             new SetShooter(rps),
-            new WaitCommand(1.25),
+            new WaitCommand(rampSeconds),
             new SetIndexer(IndexerStates.ON),
             new SetConveyor(ConveyorStates.ON)
         );

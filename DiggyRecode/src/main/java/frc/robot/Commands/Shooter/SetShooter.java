@@ -1,11 +1,6 @@
 package frc.robot.Commands.Shooter;
 
-import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
-import frc.robot.Subsystems.Conveyor.ConveyorStates;
-import frc.robot.Subsystems.Indexer.IndexerStates;
-import frc.robot.Subsystems.Indexer;
-import frc.robot.Subsystems.Conveyor;
 import frc.robot.Subsystems.Shooter;
 
 public class SetShooter extends Command {

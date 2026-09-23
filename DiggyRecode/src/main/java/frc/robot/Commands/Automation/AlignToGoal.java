@@ -53,7 +53,8 @@ public class AlignToGoal extends Command {
 
     @Override
     public void initialize() {
-        targetGoal = DriverStation.getAlliance().equals(Alliance.Blue)
+        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
+        targetGoal = alliance == Alliance.Blue
          ? Constants.FieldConstants.blueGoal.toTranslation2d() : Constants.FieldConstants.redGoal.toTranslation2d();
 
         SwerveDriveState state = s_Swerve.getState();

@@ -28,7 +28,7 @@ import frc.robot.Commands.Indexer.SetIndexer;
 import frc.robot.Commands.Intake.SetIntake;
 import frc.robot.Commands.Pivot.ForcePivot;
 import frc.robot.Commands.Shooter.SetShooter;
-// import frc.robot.Subsystems.Climb; // Climb is preserved but not in use this season
+// import frc.robot.Subsystems.Climb;
 import frc.robot.Subsystems.Conveyor;
 import frc.robot.Subsystems.Indexer;
 import frc.robot.Subsystems.Intake;
@@ -48,11 +48,11 @@ public class RobotContainer {
 
     // --- Active subsystem singletons ---
     private CommandSwerveDrivetrain drivetrain = CommandSwerveDrivetrain.getInstance();
-    private Indexer indexer = Indexer.getInstance();
-    private Intake intake = Intake.getInstance();
-    private Conveyor conveyor = Conveyor.getInstance();
-    private Shooter shooter = Shooter.getInstance();
-    private Pivot pivot = Pivot.getInstance();
+    private Indexer   indexer =                                  Indexer.getInstance();
+    private Intake    intake =                                    Intake.getInstance();
+    private Conveyor  conveyor =                                Conveyor.getInstance();
+    private Shooter   shooter =                                  Shooter.getInstance();
+    private Pivot     pivot =                                      Pivot.getInstance();
     // private Climb climb = Climb.getInstance();
 
     // --- Drive control and controllers ---
@@ -62,9 +62,7 @@ public class RobotContainer {
     /** Operator controller (port 1) — reserved for secondary mechanisms. */
     public final CommandXboxController opp = new CommandXboxController(1);
 
-    public RobotContainer() {
-        configureBindings();
-    }
+    public RobotContainer() { configureBindings(); }
 
     /**
      * Configures all driver and operator button bindings.
@@ -92,7 +90,8 @@ public class RobotContainer {
         driver.rightTrigger().onTrue(new InstantCommand(() -> control.turnOffAutoAim()));
 
         // driver.povDown().onTrue(new JiggleBallsDrivetrain(driver));
-        driver.povDown().onTrue(CommandFactory.LobAtRps(15));
+        // Fixed 15 rps test. Shooter only — feeding is POV up.
+        driver.povDown().onTrue(new SetShooter(15));
 
         driver.start().onTrue(new InstantCommand(() -> drivetrain.resetOdo()));
 
@@ -100,9 +99,14 @@ public class RobotContainer {
         driver.y().onTrue(new ForcePivot());
         driver.x().onTrue(new ForcePivot(5));
 
-        driver.b().onTrue(CommandFactory.ShootAtDistance());
+        // Shooter and indexer are separate so the wheel can finish ramping before balls are fed.
+        // B: distance RPS from odometry (Quest updates that pose), slewed at 10 rps/s.
+        driver.b().onTrue(CommandFactory.RampShooter());
+        // POV up: indexer + conveyor. Does not change shooter speed.
+        driver.povUp().onTrue(CommandFactory.Feed());
 
         driver.povLeft().onTrue(new InstantCommand(() -> drivetrain.resetOdoDynamic(resetPose.TRENCH_LEFT)));
+        //State flipper 
         driver.povRight().onTrue(CommandFactory.ReverseFeed());
 
         // driver.povLeft().onTrue(new InstantCommand(() ->
@@ -163,7 +167,7 @@ public class RobotContainer {
                 intake.setState(IntakeStates.OFF),
                 conveyor.setState(ConveyorStates.OFF),
                 indexer.setState(IndexerStates.OFF),
-                new InstantCommand(() -> shooter.setVoltage(0)));
+                new InstantCommand(() -> shooter.setVelocity(0), shooter));
     }
 
     /**

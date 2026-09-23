@@ -15,7 +15,9 @@ import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -28,8 +30,10 @@ import frc.robot.Constants.HardwarePorts;
  * <p>Uses a 3-motor configuration (topL_leader, botL follower, topR opposed follower).
  * botR is wired but not currently used (slot commented out).
  *
- * <p>setVelocity(0) falls back to voltage=0 to ensure the motors coast down quietly
- * instead of fighting the PID trying to hold 0 rps.
+ * <p>Nonzero setpoints slew at {@link Constants#shooterRampRpsPerSec} so the flywheel
+ * is not asked to step straight to the odometry request. setVelocity(0) still cuts
+ * to voltage 0 so the motors coast down instead of the PID fighting to hold 0 rps.
+ * The indexer is not slewed. The pivot stays on voltage.
  */
 public class Shooter extends SubsystemBase {
     private static Shooter instance;
@@ -66,6 +70,13 @@ public class Shooter extends SubsystemBase {
 
     /** Stores the calculated ball air-time (seconds) for velocity-based lead calculations. */
     private double airtime;
+
+    /** Latest requested flywheel speed. The motor is commanded toward this at a fixed rate. */
+    private double rampTargetRps;
+    /** Speed actually sent to the TalonFX while ramping. */
+    private double commandedRps;
+    private boolean ramping;
+    private double lastRampTimestamp;
 
     public Shooter() {
         topL_leader = new TalonFX(HardwarePorts.shooterTL, "mechbussy");
@@ -159,27 +170,77 @@ public class Shooter extends SubsystemBase {
     }
 
     /**
-     * Sets the shooter flywheel velocity using closed-loop PID + feedforward.
-     * If velocity is 0, switches to voltage=0 so the motor coasts down instead
-     * of the PID fighting to hold 0 rps (which causes stuttering).
+     * Requests a flywheel speed in rotations per second.
+     * A positive request is slewed in periodic() at {@link Constants#shooterRampRpsPerSec}.
+     * Calling this again while already ramping only updates the target, so a changing
+     * odometry distance does not restart the ramp. Zero or negative stops immediately.
      *
      * @param velocity Target velocity in rps
      */
     public void setVelocity(double velocity) {
-        if (velocity == 0)
-            topL_leader.setControl(voltageRequest.withOutput(0));
-        else
-            topL_leader.setControl(rpsRequest.withVelocity(velocity));
+        if (velocity <= 0) {
+            commandedRps = 0;
+            rampTargetRps = 0;
+            setVoltage(0);
+            return;
+        }
+
+        rampTargetRps = Math.min(velocity, Constants.shooterMaxRps);
+        if (!ramping) {
+            // Start from the wheel's real speed so the first command is not a step.
+            commandedRps = Math.max(0, getLeaderVelocity());
+            ramping = true;
+            lastRampTimestamp = Timer.getFPGATimestamp();
+        }
+    }
+
+    /**
+     * True once the flywheel is actually near the requested shot speed.
+     * False while stopped, so a 0 rps wheel is not treated as "ready to feed."
+     *
+     * @param toleranceRps Allowed miss, in rotations per second
+     */
+    public boolean isReadyToFeed(double toleranceRps) {
+        return ramping
+                && rampTargetRps > 1
+                && Math.abs(getLeaderVelocity() - rampTargetRps) <= toleranceRps;
     }
 
     /**
      * Sets the shooter flywheel to an open-loop voltage output.
      * Used for coast-down, SysId routines, and emergency cases.
+     * Clears the ramp so periodic() cannot overwrite this output.
      *
      * @param voltage Voltage to apply (V)
      */
     public void setVoltage(double voltage) {
+        ramping = false;
         topL_leader.setControl(voltageRequest.withOutput(voltage));
+    }
+
+    @Override
+    public void periodic() {
+        // Commands read this signal for the feed check. Refresh it here so that
+        // check is not looking at a stale cached value.
+        leaderVelocitySignal.refresh();
+
+        if (!ramping) {
+            return;
+        }
+
+        double now = Timer.getFPGATimestamp();
+        // Cap dt so a disable/enable gap cannot dump several seconds of ramp in one loop.
+        double dt = MathUtil.clamp(now - lastRampTimestamp, 0, 0.05);
+        lastRampTimestamp = now;
+
+        double maxDelta = Constants.shooterRampRpsPerSec * dt;
+        commandedRps += MathUtil.clamp(rampTargetRps - commandedRps, -maxDelta, maxDelta);
+
+        if (commandedRps <= 0) {
+            topL_leader.setControl(voltageRequest.withOutput(0));
+        } else {
+            topL_leader.setControl(rpsRequest.withVelocity(commandedRps));
+        }
     }
 
     /**

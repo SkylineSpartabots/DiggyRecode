@@ -1,26 +1,26 @@
 package frc.robot.Commands.Shooter;
 
-import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
-// import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
-import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.Constants;
 import frc.robot.Subsystems.Shooter;
 import frc.robot.Subsystems.Drivetrain.CommandSwerveDrivetrain;
 
+/**
+ * Spins the shooter up to the speed the current shot distance asks for.
+ * Distance comes from swerve odometry. Quest (the Oculus) feeds that pose
+ * through vision measurements; this command does not read the headset directly.
+ * The shooter slews the setpoint. This command only publishes the request.
+ */
 public class RampShooterWithDistance extends Command {
     Shooter s_Shooter;
     CommandSwerveDrivetrain s_Swerve;
-    Timer timer = new Timer();
 
     Translation3d targetGoal;
-    
+
     public RampShooterWithDistance() {
         s_Shooter = Shooter.getInstance();
         s_Swerve = CommandSwerveDrivetrain.getInstance();
@@ -30,26 +30,30 @@ public class RampShooterWithDistance extends Command {
 
     @Override
     public void initialize() {
-    targetGoal = DriverStation.getAlliance().equals(Alliance.Blue)
-        ? Constants.FieldConstants.blueGoal : Constants.FieldConstants.redGoal;
+        // getAlliance() is an Optional. Comparing the Optional itself to Alliance.Blue
+        // is always false, which used to lock this onto the wrong goal.
+        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
+        targetGoal = alliance == Alliance.Blue
+                ? Constants.FieldConstants.blueGoal
+                : Constants.FieldConstants.redGoal;
     }
 
-    // double g = 9.81;
-    // Transform2d ROBOT_TO_SHOOTER = new Transform2d(-0.1778, 0, new Rotation2d());
-    
     @Override
     public void execute() {
-        
         Translation2d currPose = s_Swerve.getState().Pose.getTranslation();
-        double d = currPose.getDistance(Constants.FieldConstants.blueGoal.toTranslation2d());
+        double d = currPose.getDistance(targetGoal.toTranslation2d());
 
-        double v = 3.52976 * d * d + -5*d + 36;
+        // Empirical fit of flywheel rps vs horizontal distance to the hub.
+        double v = 3.52976 * d * d + -5 * d + 36;
+        v = Math.min(Constants.shooterMaxRps, Math.max(0, v));
 
-        s_Shooter.updateAirtime(
-            d / (v * Math.cos(Constants.shooterAngleRad)) // seconds
-        );
+        // Horizontal exit speed is v * radius * 2pi * cos(angle). The old code used
+        // v * cos(angle) directly; keep that so airtime stays on the same scale.
+        if (v > 1) {
+            s_Shooter.updateAirtime(d / (v * Math.cos(Constants.shooterAngleRad)));
+        }
 
-        s_Shooter.setVelocity(Math.min(100, v)); // free speed max 106.3 rps
+        s_Shooter.setVelocity(v);
     }
 
     @Override

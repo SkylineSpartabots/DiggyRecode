@@ -1,7 +1,7 @@
 package frc.robot.Subsystems;
 
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.VoltageOut;
+import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
@@ -13,8 +13,8 @@ import frc.robot.Constants;
 
 /**
  * Indexer subsystem — feeds balls from the conveyor into the shooter.
- * Controlled via voltage output; uses a pre-allocated VoltageOut request to
- * avoid per-call object allocation and reduce GC pressure.
+ * Speed is closed-loop rotations per second on the TalonFX.
+ * The pivot stays on open-loop voltage.
  */
 public class Indexer extends SubsystemBase {
     private static Indexer instance;
@@ -30,31 +30,32 @@ public class Indexer extends SubsystemBase {
         return instance;
     }
 
-    /** Named voltage states for the indexer. Positive = toward shooter. */
+    /**
+     * Named speeds in motor rotations per second. Positive = toward the shooter.
+     * ON and REVERSE are the old 6 V and -3 V commands divided by kV 0.12
+     * (12 V / ~100 rps TalonFX free speed). Retune on the robot.
+     */
     public enum IndexerStates {
-        ON(6),
+        ON(50),
         OFF(0),
-        REVERSE(-3);
+        REVERSE(-25);
 
-        double voltage;
+        private final double rps;
 
-        private IndexerStates(double voltage) {
-            this.voltage = voltage;
+        private IndexerStates(double rps) {
+            this.rps = rps;
         }
 
-        /** Returns the voltage associated with this state. */
-        public double getVoltage() {
-            return voltage;
+        /** Returns the target speed for this state, in rotations per second. */
+        public double getRps() {
+            return rps;
         }
     }
 
     private final TalonFX indexerMotor;
 
-    /**
-     * Pre-allocated VoltageOut control request.
-     * Reusing this object avoids creating garbage on every setVoltage() call.
-     */
-    private final VoltageOut voltageRequest = new VoltageOut(0);
+    /** Reused so each setVelocity() does not allocate. Slot 0 holds the gains below. */
+    private final VelocityVoltage rpsRequest = new VelocityVoltage(0).withSlot(0);
 
     public Indexer() {
         indexerMotor = new TalonFX(Constants.HardwarePorts.indexer, "mechbussy");
@@ -76,6 +77,13 @@ public class Indexer extends SubsystemBase {
         config.MotorOutput.NeutralMode = neutralMode;
         config.MotorOutput.Inverted = direction;
 
+        // Not characterized. kV matches an unloaded TalonFX (~100 rps at 12 V).
+        // kP is in the same range as the shooter's characterized velocity kP.
+        config.Slot0.kS = 0.2;
+        config.Slot0.kV = 0.12;
+        config.Slot0.kP = 0.05;
+        config.Slot0.kD = 0;
+
         // Stator current limit protects the motor from overheating under load
         config.CurrentLimits.StatorCurrentLimit = Constants.CurrentLimits.indexerStator;
         config.CurrentLimits.StatorCurrentLimitEnable = true;
@@ -83,7 +91,7 @@ public class Indexer extends SubsystemBase {
         // Apply config once (previously applied twice — bug fixed)
         motor.getConfigurator().apply(config);
 
-        // Optimize CAN bus: this motor only runs open-loop, so we don't need fast feedback
+        // Status frames to the Rio only. The velocity loop runs on the motor.
         motor.getPosition().setUpdateFrequency(4);
         motor.getVelocity().setUpdateFrequency(4);
 
@@ -92,27 +100,26 @@ public class Indexer extends SubsystemBase {
     }
 
     /**
-     * Sets the indexer motor output voltage directly.
-     * Uses a pre-allocated VoltageOut request to avoid heap allocation per call.
+     * Sets the indexer speed in rotations per second.
+     * Zero commands 0 rps. The motor is in Brake.
      *
-     * @param voltage Voltage to apply (positive = toward shooter)
+     * @param rps Target speed (positive = toward shooter)
      */
-    public void setVoltage(double voltage) {
-        indexerMotor.setControl(voltageRequest.withOutput(voltage));
+    public void setVelocity(double rps) {
+        indexerMotor.setControl(rpsRequest.withVelocity(rps));
     }
 
     /**
      * Returns a one-shot command that sets the indexer to the given state.
      *
      * @param state The desired IndexerState (ON, OFF, REVERSE)
-     * @return An InstantCommand-style command that applies the voltage
+     * @return An InstantCommand-style command that applies the speed
      */
     public Command setState(IndexerStates state) {
-        return Commands.runOnce(() -> setVoltage(state.getVoltage()), this);
+        return Commands.runOnce(() -> setVelocity(state.getRps()), this);
     }
 
     @Override
     public void periodic() {
-        // No periodic telemetry needed for the indexer at this time
     }
 }

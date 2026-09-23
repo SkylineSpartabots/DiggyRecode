@@ -61,6 +61,18 @@ public class Constants {
     public static double shooterRadiusM = 0.0508;
     public static double shooterAngleRad = 1.1694;
     public static double shooterHeightM = 0.28989;
+
+    /**
+     * How fast the shooter setpoint is allowed to change, in rotations per second
+     * per second. 10 rps/s means a stopped wheel takes 5 seconds to be asked for 50 rps.
+     */
+    public static final double shooterRampRpsPerSec = 10.0;
+    /** Distance fit is clamped here. TalonFX free speed is a bit over 100 rps. */
+    public static final double shooterMaxRps = 100.0;
+    /** Auto feed starts once measured flywheel speed is this close to the request. */
+    public static final double shooterFeedToleranceRps = 5.0;
+    /** Auto will feed anyway after this long so a missed target cannot stall the path. */
+    public static final double shooterFeedTimeoutSec = 8.0;
     
     public static final class FieldConstants {
         public static Translation3d blueGoal = new Translation3d(4.6256,4.0345, 1.8288); // meters
