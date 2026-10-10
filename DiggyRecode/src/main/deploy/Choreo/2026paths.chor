@@ -28,16 +28,16 @@
    }
   },
   "mass":{
-   "exp":"200 lbs",
-   "val":90.718474
+   "exp":"124.391 lbs",
+   "val":56.42280849667001
   },
   "inertia":{
-   "exp":"6 kg m ^ 2",
-   "val":6.0
+   "exp":"6.083 kg m ^ 2",
+   "val":6.083
   },
   "gearing":{
-   "exp":"6.5",
-   "val":6.5
+   "exp":"6.027",
+   "val":6.027
   },
   "radius":{
    "exp":"2 in",
@@ -52,21 +52,21 @@
    "val":1.2
   },
   "cof":{
-   "exp":"1.5",
-   "val":1.5
+   "exp":"1.2",
+   "val":1.2
   },
   "bumper":{
    "front":{
-    "exp":"15 in",
-    "val":0.381
+    "exp":"19.675 in",
+    "val":0.499745
    },
    "side":{
-    "exp":"15 in",
-    "val":0.381
+    "exp":"15.75 in",
+    "val":0.40005
    },
    "back":{
-    "exp":"15 in",
-    "val":0.381
+    "exp":"15.75 in",
+    "val":0.40005
    }
   },
   "differentialTrackWidth":{
@@ -76,9 +76,9 @@
  },
  "generationFeatures":[],
  "codegen":{
-  "root":null,
-  "genVars":true,
+  "root":"../../java/frc/robot/Autos",
+  "genVars":false,
   "genTrajData":true,
-  "useChoreoLib":true
+  "useChoreoLib":false
  }
 }
