@@ -44,6 +44,7 @@ public class RampShooterWithDistance extends Command {
         double d = currPose.getDistance(targetGoal.toTranslation2d());
 
         // Empirical fit of flywheel rps vs horizontal distance to the hub.
+        //NOTE: This quadratic may not be accurate post August, 2026 -KR
         double v = 3.52976 * d * d + -5 * d + 36;
         v = Math.min(Constants.shooterMaxRps, Math.max(0, v));
 

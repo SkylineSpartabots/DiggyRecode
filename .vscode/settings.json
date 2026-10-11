@@ -1,0 +1,11 @@
+{
+  "java.jdt.ls.java.home": "/Users/karthik/wpilib/2026/jdk",
+  "java.import.gradle.java.home": "/Users/karthik/wpilib/2026/jdk",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-17",
+      "path": "/Users/karthik/wpilib/2026/jdk",
+      "default": true
+    }
+  ]
+}

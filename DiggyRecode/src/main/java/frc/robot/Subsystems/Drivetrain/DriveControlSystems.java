@@ -45,6 +45,8 @@ public class DriveControlSystems {
 
     /** Whether auto-aim (heading lock toward goal) is active. */
     boolean mode_AlignToGoal = false;
+    /** False until goalRotationRate() has run since the last turn-on, so a stale atGoal() cannot feed. */
+    private boolean aimSettled = false;
     /** The field-relative translation of the target goal (blue or red, set on mode change). */
     Translation2d targetGoal;
     /** Most recently calculated desired heading (radians). */
@@ -75,14 +77,12 @@ public class DriveControlSystems {
     // Auto-aim's heading math is in that same frame, so it must not be left on the default
     // OperatorPerspective, or the two modes would disagree the moment a perspective is set.
 
-    /** Reusable request for auto-aim mode (heading locked to goal). */
-    private final SwerveRequest.FieldCentricFacingAngle autoAimRequest =
-            new SwerveRequest.FieldCentricFacingAngle()
-                .withForwardPerspective(ForwardPerspectiveValue.BlueAlliance)
-                .withDesaturateWheelSpeeds(true)
-                .withSteerRequestType(SteerRequestType.MotionMagicExpo);
-
-    /** Reusable request for normal teleop drive (right stick is rotation rate). */
+    /**
+     * One request for both manual drive and auto-aim. Auto-aim puts the profiled
+     * heading rate in withRotationalRate. FieldCentricFacingAngle was the wrong
+     * request: its feedforward is added on top of a heading controller that was
+     * still aimed at 0°.
+     */
     private final SwerveRequest.FieldCentric driveRequest =
             new SwerveRequest.FieldCentric()
                 .withForwardPerspective(ForwardPerspectiveValue.BlueAlliance)
@@ -102,8 +102,8 @@ public class DriveControlSystems {
      * Builds the swerve drive request for the current loop based on joystick inputs.
      * Applies deadband + cubic scaling before mapping to chassis speeds.
      *
-     * <p>If auto-aim is active, the heading is locked toward {@link #targetGoal} using
-     * a ProfiledPID controller. Otherwise the right stick drives rotational rate directly.
+     * <p>If auto-aim is active, rotation faces {@link #targetGoal} and the right stick
+     * is ignored. Otherwise the right stick drives rotational rate directly.
      *
      * @param driverLY  Left stick Y axis (raw [-1, 1]) — translates forward/back
      * @param driverLX  Left stick X axis (raw [-1, 1]) — translates left/right
@@ -123,11 +123,10 @@ public class DriveControlSystems {
         }
 
         if (mode_AlignToGoal) {
-            // Auto-aim: lock heading toward goal, use right-stick as feedforward
-            return autoAimRequest
+            return driveRequest
                     .withVelocityX(driverLY)
                     .withVelocityY(driverLX)
-                    .withTargetRateFeedforward(calculateGoalHeading());
+                    .withRotationalRate(goalRotationRate());
         }
 
         // Normal teleop drive — right stick controls rotation rate
@@ -144,43 +143,52 @@ public class DriveControlSystems {
     }
 
     /**
-     * Calculates the desired rotational velocity feedforward to face the target goal.
-     * Uses a ProfiledPID controller on heading error and a distance-based FF scaler.
-     *
-     * @return Rotational rate feedforward (rad/s), or 0.0 if already at goal heading
+     * Rotational rate (rad/s) that points the robot's front at {@link #targetGoal}.
+     * Zero when the heading is already inside tolerance, or before a target exists.
      */
-    private double calculateGoalHeading() {
-        var state = s_Swerve.getState();
+    private double goalRotationRate() {
+        if (targetGoal == null) {
+            return 0;
+        }
 
+        var state = s_Swerve.getState();
         double currentDistance = state.Pose.getTranslation().getDistance(targetGoal);
 
-        // Simple heading angle toward target (no velocity lead — lead calculation is commented below)
+        // Field heading from the robot to the hub. +X on the robot is forward.
         targetHeading = Math.atan2(
             (targetGoal.getY() - state.Pose.getY()),
             (targetGoal.getX() - state.Pose.getX()));
 
-        // Velocity-lead heading (preserved for future use with airtime compensation):
-        // double airtime = s_Shooter.getAirtime();
-        // ChassisSpeeds velocityOffset = state.Speeds.times(airtime);
-        // targetHeading = Math.atan2(
-        //     (velocityOffset.vyMetersPerSecond + targetGoal.getY() - state.Pose.getY()),
-        //     (velocityOffset.vxMetersPerSecond + targetGoal.getX() - state.Pose.getX()));
-
-        // Scale feedforward from 0 at ffMinRadius to 1 at ffMaxRadius
+        // Scale the profile's cruise velocity down when the robot is close to the hub.
         double ffScaler = MathUtil.clamp(
                 (currentDistance - ffMinRadius) / (ffMaxRadius - ffMinRadius),
                 0.0, 1.0);
 
-        // Pre-allocate goal state to avoid WPILib allocating a new State(double, 0) internally
         autoAimGoalState.position = targetHeading;
         autoAimGoalState.velocity = 0;
 
-        // Combine profiled PID output with distance-weighted velocity feedforward
-        double thetaVelocity =
-                thetaController.getSetpoint().velocity * ffScaler
-                + thetaController.calculate(state.Pose.getRotation().getRadians(), autoAimGoalState);
+        // calculate() updates the profile. The setpoint velocity has to be read after that.
+        double correction = thetaController.calculate(
+                state.Pose.getRotation().getRadians(), autoAimGoalState);
+        aimSettled = true;
 
-        return thetaController.atGoal() ? 0 : thetaVelocity;
+        if (thetaController.atGoal()) {
+            return 0;
+        }
+        return thetaController.getSetpoint().velocity * ffScaler + correction;
+    }
+
+    /** True while a shoot or the left trigger is holding heading on the hub. */
+    public boolean isAutoAiming() {
+        return mode_AlignToGoal;
+    }
+
+    /**
+     * True once this aim cycle has run and the robot is inside the heading tolerance.
+     * False on the first loop after turning aim on, so a leftover atGoal() cannot feed.
+     */
+    public boolean isAimed() {
+        return mode_AlignToGoal && aimSettled && thetaController.atGoal();
     }
 
     /**
@@ -215,7 +223,7 @@ public class DriveControlSystems {
         // last setpoint (or 0 rad on first use) and whips toward that before the goal.
         var state = s_Swerve.getState();
         thetaController.reset(state.Pose.getRotation().getRadians(), state.Speeds.omegaRadiansPerSecond);
-
+        aimSettled = false;
         mode_AlignToGoal = true;
     }
 
@@ -224,5 +232,6 @@ public class DriveControlSystems {
      */
     public void turnOffAutoAim() {
         mode_AlignToGoal = false;
+        aimSettled = false;
     }
 }

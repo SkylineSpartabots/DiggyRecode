@@ -23,7 +23,7 @@ import frc.robot.Subsystems.Pivot.PivotStates;
 import frc.robot.Subsystems.Vision.Quest;
 import frc.robot.Commands.CommandFactory;
 import frc.robot.Commands.Automation.AlignToGoal;
-import frc.robot.Commands.Automation.JiggleBallsDrivetrain;
+//import frc.robot.Commands.Automation.JiggleBallsDrivetrain;
 import frc.robot.Commands.Convayor.SetConveyor;
 import frc.robot.Commands.Indexer.SetIndexer;
 import frc.robot.Commands.Intake.SetIntake;
@@ -64,6 +64,13 @@ public class RobotContainer {
     /** Operator controller (port 1) — reserved for secondary mechanisms. */
     public final CommandXboxController opp = new CommandXboxController(1);
 
+    /**
+     * Intake pivot position for the left-bumper toggle.
+     * Starts raised. Clockwise (positive voltage) pulls the pivot back up;
+     * counterclockwise (negative voltage) deploys it.
+     */
+    private boolean pivotLowered = false;
+
     public RobotContainer() { configureBindings(); }
 
     /**
@@ -86,11 +93,17 @@ public class RobotContainer {
         // final bindings -----------------------------------------------
 
         //opp.povUP().onTrue(new InstantCommand(()->));
-        driver.leftBumper().onTrue(new ForcePivot());// FIX COMMAND // top buttons //TODO pivot down
-        driver.rightBumper().onTrue(CommandFactory.AutoAimShoot());
+        // Left bumper toggles the intake pivot. Raised -> -4 V to deploy, lowered -> +2 V to stow.
+        driver.leftBumper().onTrue(togglePivot());
+        // Right bumper: distance RPS from odometry, and face the hub. Left stick still drives.
+        // Right trigger gives the right stick rotation back. The flywheel keeps spinning.
+        driver.rightBumper().onTrue(new AlignToGoal(
+                () -> -driver.getLeftY(),
+                () -> -driver.getLeftX()));
+        driver.rightBumper().onTrue(CommandFactory.DriverShoot());
 
-        driver.leftTrigger().onTrue(new InstantCommand(() -> control.turnOnAutoAim())); // bottom buttons
-        driver.rightTrigger().onTrue(new InstantCommand(() -> control.turnOffAutoAim()));
+        driver.leftTrigger().onTrue(Commands.runOnce(control::turnOnAutoAim));
+        driver.rightTrigger().onTrue(Commands.runOnce(control::turnOffAutoAim));
 
         // driver.povDown().onTrue(new JiggleBallsDrivetrain(driver));
         // Fixed 15 rps test. Shooter only — feeding is POV up.
@@ -101,22 +114,20 @@ public class RobotContainer {
         driver.start().onTrue(Commands.runOnce(drivetrain::resetHeading).ignoringDisable(true));
 
         driver.a().onTrue(CommandFactory.IntakeBallsON());
-        driver.y().onTrue(new ForcePivot(5));
+       
 
         //reset odo
         driver.x().onTrue(Commands.runOnce(() -> quest.anchorQuest(new Pose3d(drivetrain.getState().Pose))).ignoringDisable(true));
         //driver.x().onTrue(new ForcePivot(5));
 
-        // Shooter and indexer are separate so the wheel can finish ramping before balls are fed.
-        // B: distance RPS from odometry (Quest updates that pose), slewed at 10 rps/s.
         driver.b().onTrue(CommandFactory.IntakeBallsOFF());
-        // POV up: indexer + conveyor. Does not change shooter speed.
+        // POV up feeds whatever speed the shooter is already at. The match shot is the right bumper.
         driver.povUp().onTrue(CommandFactory.Feed());
 
         driver.povLeft().onTrue(repositionAt(resetPose.TRENCH_LEFT));
         //State flipper 
         driver.povRight().onTrue(CommandFactory.ReverseFeed());
-        opp.povDown().onTrue(CommandFactory.AllOff());
+        opp.povDown().onTrue(CommandFactory.AllOff().alongWith(Commands.runOnce(control::turnOffAutoAim)));
 
         // Operator: place the robot on a known spot and press to re-seed position.
         // Left/right are from your own driver station. Heading is kept; Start fixes heading.
@@ -173,6 +184,19 @@ public class RobotContainer {
         // driver.b().whileTrue(shooter.sysIdDynamic(Direction.kReverse));
         // driver.y().whileTrue(shooter.sysIdQuasistatic(Direction.kForward));
         // driver.a().whileTrue(shooter.sysIdQuasistatic(Direction.kReverse));
+    }
+
+    /**
+     * Toggles the intake pivot between raised and lowered.
+     * Lowering applies -4 V (counterclockwise deploy). Raising applies +2 V (clockwise stow).
+     * {@link #pivotLowered} updates only after the move finishes.
+     */
+    //toggles the pivot
+    private Command togglePivot() {
+        return Commands.either(
+                new ForcePivot(2.0).andThen(Commands.runOnce(() -> pivotLowered = false)),
+                new ForcePivot(-4.0).andThen(Commands.runOnce(() -> pivotLowered = true)),
+                () -> pivotLowered);
     }
 
     /** Re-seeds odometry at a known spot. Runs while disabled for pre-match setup. */

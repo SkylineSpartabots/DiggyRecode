@@ -6,6 +6,7 @@ import edu.wpi.first.wpilibj2.command.ParallelCommandGroup;
 import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
 import frc.robot.Constants;
+import frc.robot.Commands.Automation.AlignToGoal;
 import frc.robot.Commands.Convayor.SetConveyor;
 import frc.robot.Commands.Indexer.SetIndexer;
 import frc.robot.Commands.Intake.SetIntake;
@@ -13,6 +14,7 @@ import frc.robot.Commands.Shooter.RampShooterWithDistance;
 import frc.robot.Commands.Shooter.SetShooter;
 import frc.robot.Commands.Shooter.SetShooterAtMeter;
 import frc.robot.Subsystems.Shooter;
+import frc.robot.Subsystems.Drivetrain.DriveControlSystems;
 import frc.robot.Subsystems.Conveyor.ConveyorStates;
 import frc.robot.Subsystems.Indexer.IndexerStates;
 import frc.robot.Subsystems.Intake.IntakeStates;
@@ -26,28 +28,36 @@ import frc.robot.Subsystems.Intake.IntakeStates;
 public class CommandFactory {
 
     /**
-     * Ramps from odometry and feeds once the flywheel is at speed.
-     * AlignToGoal used to sit in front of the feed; it is still commented out, so this
-     * does not add a fake extra wait on top of the ramp. Teleop uses {@link #RampShooter()}
-     * and {@link #Feed()} on separate buttons instead of this combined command.
+     * End-of-auto shot. Ramps from odometry, turns in place toward the hub, and feeds
+     * once the wheel is up to speed and the robot is facing it.
+     * Holds the drivetrain until the auto command is cancelled.
      */
     public static Command AutoAimShoot() {
         return new RampShooterWithDistance().alongWith(
-            // new AlignToGoal().andThen(feedWhenShooterReady())
-            feedWhenShooterReady()
+            new AlignToGoal(() -> 0, () -> 0),
+            feedWhenAimed()
         );
     }
 
     /**
+     * Teleop shot. Ramps from odometry and feeds once the wheel is at speed and aim
+     * reports the robot is facing the hub. Does not take the drivetrain; schedule
+     * {@link AlignToGoal} next to this so the left stick can still translate.
+     */
+    public static Command DriverShoot() {
+        return new RampShooterWithDistance().alongWith(feedWhenAimed());
+    }
+
+    /**
      * Ramps the shooter from odometry and feeds once measured speed is close to the request.
-     * The old fixed 1 second wait fed balls while a 10 rps/s ramp was still near idle.
+     * No aiming, so a path command can own the drivetrain at the same time.
      */
     public static Command ShootAtDistance() {
         return new RampShooterWithDistance().alongWith(feedWhenShooterReady());
     }
 
     /**
-     * Shooter only. Driver button for spinning up. Does not run the indexer.
+     * Shooter only. Spins up from odometry and does not feed or aim.
      */
     public static Command RampShooter() {
         return new RampShooterWithDistance();
@@ -71,6 +81,20 @@ public class CommandFactory {
         return Commands.waitUntil(() -> Shooter.getInstance().isReadyToFeed(Constants.shooterFeedToleranceRps))
             .withTimeout(Constants.shooterFeedTimeoutSec)
             .andThen(Feed());
+    }
+
+    /**
+     * Feeds once the flywheel is at the distance speed and the robot is facing the hub.
+     * If the driver takes rotation back (right trigger), the wheel-speed check is enough.
+     * The timeout still feeds if aim or the wheel never gets there.
+     */
+    private static Command feedWhenAimed() {
+        return Commands.waitUntil(() -> {
+            boolean wheelReady = Shooter.getInstance().isReadyToFeed(Constants.shooterFeedToleranceRps);
+            DriveControlSystems aim = DriveControlSystems.getInstance();
+            boolean pointing = !aim.isAutoAiming() || aim.isAimed();
+            return wheelReady && pointing;
+        }).withTimeout(Constants.shooterFeedTimeoutSec).andThen(Feed());
     }
 
     /**
